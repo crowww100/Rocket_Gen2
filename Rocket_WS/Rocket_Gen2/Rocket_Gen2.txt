@@ -1,1 +1,1 @@
-./Debug/main.cpp.o ./Debug/PCA9685.cpp.o ./Debug/HWT906.cpp.o
+./Debug/PCA9685.cpp.o ./Debug/HWT906.cpp.o ./Debug/main.cpp.o

@@ -18,6 +18,7 @@
 /*		- keep wing-ctrl on --> crosscheck for activated wing-ctrl								*/
 /*																								*/
 /* 1b. Fueling (automatic or manual) --> stage =1												*/
+/*		- start clearance & activate datalogging via reedcontact --> 3x beep logging confirmed	*/
 /*																								*/
 /* 2. Rocket launch --> stage = 2																*/
 /*	- send start clearance to rocket launcher													*/
@@ -71,6 +72,7 @@
 #include <mqueue.h>
 #include <curses.h>
 #include <stdio.h>
+#include <ncurses.h>
 
 //defines_________________________________________________________________________________________
 #define SERVER_QUEUE_NAME_1   "/queue_BN880"
@@ -110,7 +112,7 @@ double target_delta_east=0;
 double alpha_to_target=0;
 double distance2target=0;
 int onTargetTest=0;
-
+int onTarget=0;
 //variables for servos
 int Servo_parachute_offset=0; //middleposition
 int Servo_PL_offset=385;
@@ -241,6 +243,11 @@ void initialization(void)
 {
 	//Initialisation wiringPi_________________________________________________________________________________
 	wiringPiSetup(); //wiringPiSetup
+	pinMode(5,OUTPUT); //beep sound
+	pinMode(27,INPUT); //reedcontact
+	digitalWrite(5,HIGH);
+	usleep(10000);
+	digitalWrite(5,LOW);
 
 	//Initialization of message queue format
 	attr.mq_flags = 0;
@@ -307,6 +314,7 @@ void initialization(void)
 	printf("Start up procedure:   servos initialised and switched off\n");
 	usleep(1000000);
 
+
 	//UART initialization for HTW906-Sensor______________________________________________________________
 	fd = uart_open(fd,"/dev/ttyUSB0");
 	bzero(r_buf,1024);
@@ -327,13 +335,31 @@ void initialization(void)
 	//fp = fopen("Record.txt","w");
 	printf("Start up procedure:   Initialization completed\n");
 	printf("Start up procedure:   start GPS-Client manually, then press Enter\n");
-	printf("press ENTER________________________________________________________________________________________________\n");
-
-	c_input=getchar(); //wait for key press
+	printf("press ENTER or reed contact________________________________________________________________________________\n");
+	for(int i =0;i<5;i++)
+		{
+			digitalWrite(5,1);
+			usleep(10000);
+			digitalWrite(5,0);
+			usleep(200000);
+		}
+	//c_input=getchar(); //wait for key press
+	while(digitalRead(27))
+	{
+		//wait for reedcontact
+	}
+		for(int i =0;i<3;i++)
+		{
+			digitalWrite(5,1);
+			usleep(10000);
+			digitalWrite(5,0);
+			usleep(300000);
+		}
 }
 
 void compassCalibration(int caltime)
 {
+	usleep(3000000);
 	elapsedTime=0;
 	gettimeofday(&start_time,NULL);
 	printf("Start up procedure:   start compass calibration --> rotate rocket around y-axes!\n");
@@ -402,9 +428,16 @@ void compassCalibration(int caltime)
 	printf("Start up procedure:   compass_y_min = %f   compass_y_max = %f \n",C_C_D.y_min, C_C_D.y_max);
 	printf("Start up procedure:   compass_x_delta = %f   compass_z_delta = %f   compass_y_delta = %f \n",C_C_D.delta_x, C_C_D.delta_z, C_C_D.delta_y);
 	printf("Start up procedure:   compass calibration completed\n");
-	printf("press ENTER________________________________________________________________________________________________\n");
-
-	c_input=getchar(); //wait for key press
+	printf("press ENTER or reed contact________________________________________________________________________________\n");
+	//c_input=getchar(); //wait for key press
+	for(int i =0;i<3;i++)
+		{
+			digitalWrite(5,1);
+			usleep(10000);
+			digitalWrite(5,0);
+			usleep(300000);
+		}
+	usleep(5000000);
 	stage=1;
 }
 
@@ -507,6 +540,10 @@ void getGPSsensorData(mqd_t qd_server_BN880_,char in_buffer_[]) //collect data f
 			alpha_to_target= PI+atan(target_delta_east/target_delta_north);
 		}
 		alpha_to_target=alpha_to_target * 360/(2*PI);
+		
+		//calc distance2Target
+		//Info: 1 sec_north = 0,0186m; 1sec_east = 0,0122m
+		distance2target= sqrtf((target_delta_north*target_delta_north*0.00034596)+(target_delta_east*target_delta_east*0.00014884));
 
 //		printf("delta_north_sec = %f delta_east_sec= %f alpha_to_target= %f\n", target_delta_north, target_delta_east,alpha_to_target);
 
@@ -600,7 +637,7 @@ void execute_stage_1(void)
 	/*		- crosscheck of orientation and calculated distance to target							*/
 	/*	- Bring wings to straight position															*/
 	/*		- keep wing-ctrl on --> crosscheck for activated wing-ctrl								*/
-	/*	- Activate data logging																		*/
+	/*	- start clearance & activattion of data logging via reedcontact								*/
 	/*																								*/
 
 	//Set Servo to initial position and switch off
@@ -621,32 +658,44 @@ void execute_stage_1(void)
 	
 	//activate rescue system
 	Servo_parachute.setServoPos(180); //bring parachute servo to lock position (180= lock; 280 = release)
-	printf("Prelaunch phase Stage 1:   Stagerescue system activated but not armed\n");
+	printf("Prelaunch phase Stage 1:   rescue system activated but not armed\n");
 	usleep(1000000); //wait for servo move to initial position
 
 	printf("Prelaunch phase Stage 1:   waiting for GPS-lock\n");
+	usleep(5000000);
 	while(BN880_output.north_sec==0)
 	{
 		getGPSsensorData(qd_server_BN880,in_buffer);
 	}
+	
+	
 	printf("Prelaunch phase Stage 1:   GPS-lock completed\n");
 	printf("press ENTER________________________________________________________________________________________________\n");
-		c_input=getchar(); //wait for key press
+	//c_input=getchar(); //wait for key press
+	for(int i =0;i<3;i++)
+	{
+		digitalWrite(5,1);
+		usleep(10000);
+		digitalWrite(5,0);
+		usleep(300000);
+	}
+	
 	printf("Prelaunch phase Stage 1:   Rotate rocket around y until beep\n");
-	printf("Prelaunch phase Stage 1:   Crosscheck if back faces to target and wings are straight ahead --> confirm with ENTER\n");
+	printf("Prelaunch phase Stage 1:   Crosscheck if back faces to target and wings are straight ahead \n");
 
 
-	while(1)//getchar() == ERR) // as long as no button pressed
+	while(!onTarget) // as long as back of rocket not facing to target
 	{
 		//Collecting all sensor data_________________________
-		getHorizonData(qd_server_horizon,in_buffer);
+		//getHorizonData(qd_server_horizon,in_buffer);
 		//getGPSsensorData(qd_server_BN880,in_buffer);
 		getMotionDataHWT906();
-
+		//printf("test");
 		// calc y_rotation (spin prevention)______________________________________________________________________________
 		rot_prevent_out= (int)(HWT906_output.w_y*rot_prevent_p);
 
 		// calc y_rotation (heading)________________________________________________________________
+
 		e_y_heading_tmp=alpha_to_target -compass_heading;
 		if((e_y_heading_tmp>=0 && e_y_heading_tmp<180)||(e_y_heading_tmp<0 && e_y_heading_tmp>-180))
 		{
@@ -660,26 +709,79 @@ void execute_stage_1(void)
 		{
 			e_y_heading=360+e_y_heading_tmp;
 		}
-
+		printf("e_heading %f \n",e_y_heading);
 		rot_y=(int)((e_y_heading)*rot_y_p);
 		
 		calcNewServoPos();
 
+		//beep when e_y_heading absolut <2°
+		if((e_y_heading < 2) && (e_y_heading > -2))
+		{
+				for(int i=0;i<400;i++)
+				{
+					digitalWrite(5,HIGH);
+					usleep(2000);
+					digitalWrite(5,LOW);
+					usleep(3000);
+				}
+				onTarget=1;
+		}
 	}
+	usleep(3000000);
 	
-	c_input=getchar(); //wait for key press
 	//calc distance to target
 	printf("Prelaunch phase Stage 1:   Distance to target = %d m\n", (int)distance2target);
 	printf("Prelaunch phase Stage 1:   Crosscheck if distance to target is valid --> confirm with ENTER\n");
-	c_input=getchar(); //wait for key press
+	//c_input=getchar(); //wait for key press
+	for(int i=0;i<((int)(distance2target/10));i++) //one beep for each 10m
+	{
+		digitalWrite(5,HIGH);
+		usleep(2000);
+		digitalWrite(5,LOW);
+		usleep(500000);
+	}
+	
+	//Set Servo to initial position and keep on
+	Servo_PL.setServoPos(Servo_PL_offset); // ca 560 bis 150 --> 204 bis 408 (1ms bis 2 ms
+	usleep(200000);
+	Servo_PR.setServoPos(Servo_PR_offset);
+	usleep(200000);
+	Servo_GU.setServoPos(Servo_GU_offset);
+	usleep(200000);
+	Servo_GD.setServoPos(Servo_GD_offset);
+	usleep(200000);
 	printf("Prelaunch phase Stage 1:   Rocket is now initialized and calibrated, target data are confirmed\n");
 	printf("Prelaunch phase Stage 1:   bring rocket into launch position and start fueling\n");
-	printf("press ENTER________________________________________________________________________________________________\n");
+	printf("start clearance & acitvation of data logging via reedcontact___________________________________________________\n");
+	usleep(3000000);
+	for(int i =0;i<5;i++)
+		{
+			digitalWrite(5,1);
+			usleep(10000);
+			digitalWrite(5,0);
+			usleep(200000);
+		}
+	while(digitalRead(27))
+	{
+		//wait for reedcontact
+	}
+		for(int i =0;i<3;i++)
+		{
+			digitalWrite(5,1);
+			usleep(10000);
+			digitalWrite(5,0);
+			usleep(300000);
+		}
+	stage=2;
+
 }
 
 void execute_stage_2(void)
 {
-	
+	while(1)
+	{
+		
+	}
 }
 
 void execute_stage_3(void)
