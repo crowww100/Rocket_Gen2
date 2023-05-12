@@ -9,8 +9,9 @@
 #include <linux/i2c-dev.h>
 #include <sys/ioctl.h>
 #include <fcntl.h>
+#include <unistd.h>
 
-void main() 
+int main() 
 {
 	// Create I2C bus
 	int file;
@@ -34,13 +35,33 @@ void main()
 	config[0] = 0x13;
 	config[1] = 0x07;
 	write(file, config, 2);
-	// Select control register(0x26)
-	// Active mode, OSR = 128, altimeter mode(0xB9)
-	config[0] = 0x26;
-	config[1] = 0xB9;
-	write(file, config, 2);
-	sleep(1);
 
+	while(1)
+	{
+		// Read 6 bytes of data from address 0x00(00)
+	        // status, tHeight msb1, tHeight msb, tHeight lsb, temp msb, temp lsb
+        	char reg[1] = {0x00};
+        	write(file, reg, 1);
+        	char data[6] = {0};
+        	if(read(file, data, 6) != 6)
+        	{
+                	printf("Error : Input/Output error \n");
+                	exit(1);
+        	}
+
+        	// Convert the data
+       	 	//int tHeight = ((data[1] * 65536) + (data[2] * 256 + (data[3] & 0xF0)) >>4);
+		int tHeight = ((data[3] & 0xF0)>>4)+ (data[2] <<4) + (data[1]<<12) ;
+        	//int temp = ((data[4] * 256) + (data[5] & 0xF0)) / 16;
+        	int temp = ((data[5] & 0xF0)>>4)+(data[4]<<4);
+		float altitude = tHeight / 16.0;
+        	float cTemp = (temp / 16.0);
+        	float fTemp = cTemp * 1.8 + 32;
+
+		printf("Altitude : %.2f m \n", altitude);
+		printf("Temperature in Celsius : %.2f C \n", cTemp);
+
+	}
 	// Read 6 bytes of data from address 0x00(00)
 	// status, tHeight msb1, tHeight msb, tHeight lsb, temp msb, temp lsb
 	char reg[1] = {0x00};

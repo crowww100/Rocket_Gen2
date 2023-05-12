@@ -14,17 +14,17 @@ class Servo
                 Servo();  //constructor
                 ~Servo(); //destructor
                 void init(void);
-                void setRangeMin(int rangeMin = 200); // default value =200 middle = 350
-                void setRangeMax(int rangeMax = 400); // default value = 500
-                void setChannel(int channel = 0);        // default channel = 0
+                void setRangeMin(int rangeMin = 0xCCC); // 
+                void setRangeMax(int rangeMax = 0x1998); // 
+                void setChannel(int channel = 0);        
                 void setServoPos(int pos = 0);
                 void readReg(int reg= 0);
                 void switchOff(void);
         private:
                 int fd; //filedescriptor
                 int channel;
-                int rangeMin = 200;
-                int rangeMax = 400;
+                int rangeMin = 0xCCC;
+                int rangeMax = 0x1998;
                 int result;
 };
 

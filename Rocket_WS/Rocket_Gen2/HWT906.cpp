@@ -156,7 +156,7 @@ struct HWT906_out ParseData(char chr)
 		unsigned char i;
 		char cTemp=0;
 
-		time_t now;
+		//time_t now;
 		chrBuf[chrCnt++]=chr;
 		if (chrCnt<11) return(ret);
 		for (i=0;i<10;i++)
@@ -179,8 +179,9 @@ struct HWT906_out ParseData(char chr)
 					{
 						a[i] = (float)sData[i]/32768.0*16.0;
 					}
-					time(&now);
+					//time(&now);
 					//printf("\r\nT:%s a:%6.3f %6.3f %6.3f ",asctime(localtime(&now)),a[0],a[1],a[2]);
+					ret.a_y=a[1];
 					break;
 				case 0x52:
 					for (i=0;i<3;i++)
@@ -189,8 +190,8 @@ struct HWT906_out ParseData(char chr)
 					}
 					//printf("w:%7.3f %7.3f %7.3f ",w[0],w[1],w[2]);
 					//printf("wv_roh %f     ", w[1]);
-					ret.w_x=w[0];
-					ret.w_y=w[1];
+					ret.w_x=w[0]; 
+					ret.w_y=w[1]; 
 					ret.w_z=w[2];
 					break;
 				case 0x53:
@@ -205,8 +206,8 @@ struct HWT906_out ParseData(char chr)
 					{
 						h[i] = (float)sData[i];
 					}
-					ret.h_x = h[0];
-					ret.h_y = h[1];
+					ret.h_x = h[0]; 
+					ret.h_y = h[1]; 
 					ret.h_z = h[2];
 					//printf("Kompass_z: %4.0f     ",ret.h_z);
 					//printf("h:%4.0f %4.0f %4.0f ",h[0],h[1],h[2]);
@@ -218,6 +219,7 @@ struct HWT906_out ParseData(char chr)
 
 double calc_comp_heading(struct compass_calibration_data calibration_data, double h_x, double h_z, double h_y)
 {
+
 	double compass_x_norm;
 	double compass_z_norm;
 	double compass_y_norm;
@@ -248,6 +250,7 @@ double calc_comp_heading(struct compass_calibration_data calibration_data, doubl
 	if((compass_x_norm>=0)&&(compass_z_norm>=0))
 	{
 		alpha_north=atan(compass_x_norm/compass_z_norm);
+		//alpha_north=atan(compass_z_norm/compass_x_norm); //neu
 		/*if(compass_z_norm>=compass_x_norm) //old solution
 		{
 			alpha_north=asin(compass_x_norm/reference);
@@ -261,6 +264,7 @@ double calc_comp_heading(struct compass_calibration_data calibration_data, doubl
 	if((compass_x_norm>=0)&&(compass_z_norm<0))
 	{
 		alpha_north=atan(-compass_z_norm/compass_x_norm)+PI/2;
+		//alpha_north=atan(-compass_z_norm/compass_x_norm)+3*PI/2;
 		/*if(compass_x_norm>=-compass_z_norm) //old solution
 		{
 			alpha_north=PI/2+asin(-compass_z_norm/reference);
@@ -274,6 +278,7 @@ double calc_comp_heading(struct compass_calibration_data calibration_data, doubl
 	if((compass_x_norm<0)&&(compass_z_norm<0))
 	{
 		alpha_north=atan(-compass_x_norm/-compass_z_norm)+PI;
+		//alpha_north=atan(-compass_z_norm/-compass_x_norm)+PI; //neu
 		/*if(-compass_z_norm>=-compass_x_norm) //old solution
 		{
 			alpha_north=PI+asin(-compass_x_norm/reference);
@@ -287,6 +292,7 @@ double calc_comp_heading(struct compass_calibration_data calibration_data, doubl
 	if((compass_x_norm<0)&&(compass_z_norm>=0))
 	{
 		alpha_north=atan(compass_z_norm/-compass_x_norm)+3*PI/2;
+		//alpha_north=atan(compass_z_norm/-compass_x_norm)+PI/2; //neu
 		/*if(compass_z_norm<-compass_x_norm) //old solution
 		{
 			alpha_north=3*PI/2+asin(compass_z_norm/reference);
@@ -296,8 +302,9 @@ double calc_comp_heading(struct compass_calibration_data calibration_data, doubl
 			alpha_north=2*PI-asin(-compass_x_norm/reference);
 		}*/
 	}
-
+	
 	alpha_north=alpha_north*360/(2*PI);
+	alpha_north=360-alpha_north; //due to change of orientation of sensor
 	//printf("alpha_north = %f    ",alpha_north);
 	return alpha_north;
 }

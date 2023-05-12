@@ -20,36 +20,37 @@
 /* 1b. Fueling (automatic or manual) --> stage =1												*/
 /*		- start clearance & activate datalogging via reedcontact --> 3x beep logging confirmed	*/
 /*																								*/
-/* 2. Rocket launch --> stage = 2																*/
+/* 1c. Rocket launch --> stage = 2																*/
 /*	- send start clearance to rocket launcher													*/
 /*	- keep wings activated and straight during rocket launch									*/
 /*																								*/
-/* 3. Thrust phase --> stage = 3																*/
+/* 2. Thrust phase --> stage = 3																*/
+/*	- calculate altitude_offset																	*/
 /*	- keep wings activated and straight during thrust phase										*/
 /*	- detect end of thrust phase (acceleration <0)												*/
 /*																								*/
-/* 4. climb phase --> stage =4																	*/
+/* 3. climb phase --> stage =4																	*/
 /*	- rotate rocket (roll) until bottom side is oriented to target								*/
 /*	- wait for climb speed < x km/h																*/
 /*																								*/
-/* 5. Zenith-turn --> stage = 5																	*/
+/* 4. Zenith-turn --> stage = 5																	*/
 /*	- activate z-control (target corner = 100°)													*/
 /*	- rotate until 100° (use integrated z-orientation since launche								*/
 /*	- activate horizon scanner																	*/
 /*																								*/
-/* 6. Target approach (far) --> stage = 6														*/
+/* 5. Target approach (far) --> stage = 6														*/
 /*	- set target for z-control to 135°															*/
 /*		- if horizon = valid, set z-accumulation to 0											*/
 /*		- if horizon != valid, use z-accumulation												*/
 /*	- activate x-control (!!! separate compass-SW needed (135°))								*/
 /*	- activate y-control (keep rocket parallel to horizon)										*/
 /*																								*/
-/* 7. Target approach (close)--> stage = 7														*/
+/* 6. Target approach (close)--> stage = 7														*/
 /*	- set target for z-control to 180° (use z-accumulation from last valid horizon				*/
 /*		if z-angle close to 180° set wings straight (z-control off)								*/
 /*	- activate target-scanner																	*/
 /*																								*/
-/* 8. Target accquired --> stage = 8															*/
+/* 7. Target accquired --> stage = 8															*/
 /*	- confirm target																			*/
 /*	- activate x-ctrl (use target-info from visual guidance)									*/
 /*	- activate z-ctrl (use target-info from visual guidance)									*/
@@ -92,8 +93,10 @@ void compassCalibration(int);
 void getHorizonData(mqd_t, char[]);
 void getGPSsensorData(mqd_t, char[]);
 void getMotionDataHWT906(void);
+void getAltitude(void);
 void writeLoggingData(void);
 void calcNewServoPos(void);
+void execute_stage_0(void);
 void execute_stage_1(void);
 void execute_stage_2(void);
 void execute_stage_3(void);
@@ -102,7 +105,7 @@ void execute_stage_5(void);
 void execute_stage_6(void);
 void execute_stage_7(void);
 void execute_stage_8(void);
-//global virables_________________________________________________________________________________
+//global variables_________________________________________________________________________________
 
 //target data
 double target_north_sec = 2194464;
@@ -113,20 +116,21 @@ double alpha_to_target=0;
 double distance2target=0;
 int onTargetTest=0;
 int onTarget=0;
+
 //variables for servos
 int Servo_parachute_offset=0; //middleposition
-int Servo_PL_offset=385;
-int Servo_PR_offset=430;
-int Servo_GU_offset=320;
-int Servo_GD_offset=410;
+int Servo_PL_offset= -10; //2
+int Servo_PR_offset= 10; //0
+int Servo_GU_offset= -10; //3
+int Servo_GD_offset= 10; //1
 int Servo_PL_pos;
 int Servo_PR_pos;
 int Servo_GU_pos;
 int Servo_GD_pos;
 
 //variables for control loops
-double rot_prevent_p = -0.5;
-double rot_y_p = 0.8;
+double rot_prevent_p = -0.3;
+double rot_y_p = 0.4;
 int rot_prevent_out= 0;
 int rot_y=0;
 
@@ -156,7 +160,12 @@ char GPS_height[3];
 //variables for time
 struct timeval start_time;
 struct timeval end_time;
+struct timeval flight_time_start;
+struct timeval flight_time_end;
 long long elapsedTime;
+long long elapsedFlightTime=0;
+long long elapsedFlightTime_old=0;
+time_t now;
 
 //create servo objects
 Servo Servo_parachute;
@@ -175,11 +184,24 @@ char in_buffer [MSG_BUFFER_SIZE];
 struct mq_attr attr;
 
 //other variables
-int stage = 0; //description in project description
+int stage = 2; //description in project description
 char c_input;
+int launchDetected=0;
+
+//MPL3115a2 altimeter
+static int fd_MPL;
+int MPL_data_1=0;
+int MPL_data_2=0;
+int MPL_data_3=0;
+int MPL_data_4=0;
+int MPL_data_5=0;
+int MPL_data_6=0;
+float altitude=0;
+int height=0;
+float altitude_offset=0;
 
 //File for datarecorder
-FILE *fp; //file for recording HWT906 data
+FILE *fptr; //file for recording HWT906 data
 
 
 //Main____________________________________________________________________________________________________________
@@ -194,17 +216,19 @@ int main (int argc, char **argv)
 	while(1)
 	{
 		//Collecting all sensor data_________________________
-		getHorizonData(qd_server_horizon,in_buffer);
-		getGPSsensorData(qd_server_BN880,in_buffer);
-		getMotionDataHWT906();
+		//getHorizonData(qd_server_horizon,in_buffer);
+		//getGPSsensorData(qd_server_BN880,in_buffer);
+		//getMotionDataHWT906();
 
 		//select & execute current stage
+		//stage=0;	///////////////////////////////////////////////debug
 		switch (stage)
 		{
-			case 1: execute_stage_1(); break;
-			case 2: execute_stage_2(); break;
-			case 3: execute_stage_3(); break;
-			case 4: execute_stage_4(); break;
+			case 0: execute_stage_0(); break; //Debug stage
+			case 1: execute_stage_1(); break; //Pre launch
+			case 2: execute_stage_2(); break; //launch & accelerate
+			case 3: execute_stage_3(); break; //climb and rotate to target
+			case 4: execute_stage_4(); break; 
 			case 5: execute_stage_5(); break;
 			case 6: execute_stage_6(); break;
 			case 7: execute_stage_7(); break;
@@ -249,6 +273,45 @@ void initialization(void)
 	usleep(10000);
 	digitalWrite(5,LOW);
 
+	//Initialization of MPL3115A2 altimeter
+	fd_MPL = wiringPiI2CSetup(0x60);
+	wiringPiI2CWriteReg8(fd_MPL, 0x26, 0xA0); // A0 --> 16x oversample; one shot mode//B9
+	wiringPiI2CWriteReg8(fd_MPL, 0x13, 0x07);
+
+	//get altitude_offset
+	for(int i=0;i<3;i++)
+	{
+		wiringPiI2CWriteReg8(fd_MPL, 0x26, 0xA2); // A2 --> 16x oversample
+		while(!(wiringPiI2CReadReg8(fd_MPL, 0x06) & 0x04))
+		{
+			//wait for altitude data ready flag
+		}
+		MPL_data_1=wiringPiI2CReadReg8(fd_MPL, 0x01);
+		MPL_data_2=wiringPiI2CReadReg8(fd_MPL, 0x02);
+		MPL_data_3=wiringPiI2CReadReg8(fd_MPL, 0x03);
+		height= ((MPL_data_3 & 0xF0)>>4) +(MPL_data_2 <<4) + (MPL_data_1<<12);
+		altitude=(float)height/16;
+		altitude_offset= altitude_offset + altitude;
+		wiringPiI2CWriteReg8(fd_MPL, 0x26, 0xA0); // A2 --> 16x oversample
+		//usleep(100);
+	}
+	
+	
+	
+	/*for(int i=0;i<3;i++) //continuous mode instead of one shot (1Hz)
+	{
+		MPL_data_1=wiringPiI2CReadReg8(fd_MPL, 0x01);
+		MPL_data_2=wiringPiI2CReadReg8(fd_MPL, 0x02);
+		MPL_data_3=wiringPiI2CReadReg8(fd_MPL, 0x03);
+		height= ((MPL_data_3 & 0xF0)>>4) +(MPL_data_2 <<4) + (MPL_data_1<<12);
+		altitude=(float)height/16;
+		altitude_offset= altitude_offset + altitude;
+	}*/
+	altitude_offset=altitude_offset/3;
+	printf("altitude offset = %.2f \n", altitude_offset);
+
+	
+
 	//Initialization of message queue format
 	attr.mq_flags = 0;
 	attr.mq_maxmsg = MAX_MESSAGES;
@@ -264,7 +327,7 @@ void initialization(void)
 	else
 	{
 		printf("Start up procedure:   posix message queue for BN880 generated\n");
-		usleep(1000000);
+		usleep(100000);
 	}
 
 	if ((qd_server_horizon = mq_open (SERVER_QUEUE_NAME_2, O_RDONLY | O_CREAT, QUEUE_PERMISSIONS, &attr)) == -1)
@@ -275,7 +338,7 @@ void initialization(void)
 	else
 	{
 		printf("Start up procedure:   posix message queue for horiozon generated\n");
-		usleep(1000000);
+		usleep(100000);
 	}
 
 	//Initialisation of servos_______________________________________________________________________________
@@ -284,27 +347,34 @@ void initialization(void)
 	Servo_GU.init();
 	Servo_GD.init();
 
-	Servo_parachute.setRangeMin(170);
-	Servo_parachute.setRangeMax(290);
-	Servo_parachute.setChannel(0);
+	Servo_parachute.setRangeMin(206);
+	Servo_parachute.setRangeMax(408);
+	Servo_parachute.setChannel(8);
 
-	Servo_PL.setRangeMin(Servo_PL_offset-120);
-	Servo_PL.setRangeMax(Servo_PL_offset+120);
-	Servo_PL.setChannel(8);
+	Servo_PL.setRangeMin(Servo_PL_offset+206);
+	Servo_PL.setRangeMax(Servo_PL_offset+408);
+	Servo_PL.setChannel(2);
 
-	Servo_PR.setRangeMin(Servo_PR_offset-120);
-	Servo_PR.setRangeMax(Servo_PR_offset+120);
-	Servo_PR.setChannel(10);
+	Servo_PR.setRangeMin(Servo_PR_offset+206);
+	Servo_PR.setRangeMax(Servo_PR_offset+408);
+	Servo_PR.setChannel(0);
 
-	Servo_GU.setRangeMin(Servo_GU_offset-120);
-	Servo_GU.setRangeMax(Servo_GU_offset+120);
-	Servo_GU.setChannel(11);
+	Servo_GU.setRangeMin(Servo_GU_offset+206);
+	Servo_GU.setRangeMax(Servo_GU_offset+408);
+	Servo_GU.setChannel(3);
 
-	Servo_GD.setRangeMin(Servo_GD_offset-120);
-	Servo_GD.setRangeMax(Servo_GD_offset+120);
-	Servo_GD.setChannel(9);
+	Servo_GD.setRangeMin(Servo_GD_offset+206);
+	Servo_GD.setRangeMax(Servo_GD_offset+408);
+	Servo_GD.setChannel(1);
 	
 	Servo_parachute.switchOff();
+	
+	Servo_GD.setServoPos(307+Servo_GD_offset);
+	Servo_GU.setServoPos(307+Servo_GU_offset);
+	Servo_PL.setServoPos(307+Servo_PL_offset);
+	Servo_PR.setServoPos(307+Servo_PR_offset);
+	usleep(1000000);
+	
 	Servo_PL.switchOff();
 	Servo_PR.switchOff();
 	Servo_GU.switchOff();
@@ -332,7 +402,8 @@ void initialization(void)
 	usleep(1000000);
 
 	//open file for data-logging_________________________________________________________________________
-	//fp = fopen("Record.txt","w");
+	fptr = fopen("Record.txt","w");
+	
 	printf("Start up procedure:   Initialization completed\n");
 	printf("Start up procedure:   start GPS-Client manually, then press Enter\n");
 	printf("press ENTER or reed contact________________________________________________________________________________\n");
@@ -344,7 +415,7 @@ void initialization(void)
 			usleep(200000);
 		}
 	//c_input=getchar(); //wait for key press
-	while(digitalRead(27))
+/*	while(digitalRead(27))
 	{
 		//wait for reedcontact
 	}
@@ -355,18 +426,41 @@ void initialization(void)
 			digitalWrite(5,0);
 			usleep(300000);
 		}
-}
+		usleep(3000000); //wait to remove magnet
+*/
+ }
 
 void compassCalibration(int caltime)
 {
-	usleep(3000000);
+	//usleep(3000000);
+	for(int i=0;i<800;i++)
+	{
+		HWT906_output.h_x=0xffff;
+		HWT906_output.h_y=0xffff;
+		HWT906_output.h_z=0xffff;
+		
+		ret = recv_data(fd,r_buf,44); //4*11characters = 44
+		if(ret == -1)
+		{
+			fprintf(stderr,"uart read failed!\n");
+			exit(EXIT_FAILURE);
+		}
+		for (int i=0;i<ret;i++)
+		{
+			HWT906_output=ParseData(r_buf[i]);
+		}
+	}
+	
+	
+	
 	elapsedTime=0;
 	gettimeofday(&start_time,NULL);
 	printf("Start up procedure:   start compass calibration --> rotate rocket around y-axes!\n");
 	printf("Start up procedure:   Remaining calibration time:   %d s\n",caltime);
-
+	
 	while(elapsedTime<(caltime*1000000))
 	{
+
 		HWT906_output.h_x=0xffff;
 		HWT906_output.h_y=0xffff;
 		HWT906_output.h_z=0xffff;
@@ -379,11 +473,14 @@ void compassCalibration(int caltime)
 		}
 		for (int i=0;i<ret;i++)
 		{
-			//fprintf(fp,"%2X ",r_buf[i]);  //write data to logfile Record.txt
 			HWT906_output=ParseData(r_buf[i]);
 		}
+
+		//printf("parsedata = %f \n",HWT906_output.h_x);
+
+
 		if((HWT906_output.h_x!=0xffff)&& (HWT906_output.h_x!=0))
-		{
+		{	
 			if(HWT906_output.h_x<C_C_D.x_min)
 			{
 				C_C_D.x_min = HWT906_output.h_x;
@@ -392,6 +489,7 @@ void compassCalibration(int caltime)
 			{
 				C_C_D.x_max = HWT906_output.h_x;
 			}
+			printf("h_x=%f   h_y=%f   h_z=%f    min_x=%f   \n", HWT906_output.h_x, HWT906_output.h_y, HWT906_output.h_z, C_C_D.x_min);
 		}
 		if((HWT906_output.h_z!=0xffff) && (HWT906_output.h_z!=0))
 		{
@@ -438,7 +536,7 @@ void compassCalibration(int caltime)
 			usleep(300000);
 		}
 	usleep(5000000);
-	stage=1;
+	stage=2;
 }
 
 void getHorizonData(mqd_t qd_server_horizon_, char in_buffer_[]) //collect data from horizon detection module via IPC
@@ -603,19 +701,36 @@ void getMotionDataHWT906(void)
 	{
 		Angle_y=(double)360+Angle_y;
 	}
+
 	//printf("y_rot_sum: %3f ° | ",Angle_y);
+}
+
+void getAltitude(void)
+{
+	wiringPiI2CWriteReg8(fd_MPL, 0x26, 0xA2); // A2 --> 16x oversample
+		while(!(wiringPiI2CReadReg8(fd_MPL, 0x06) & 0x04))
+		{
+			//wait for altitude data ready flag
+		}
+	MPL_data_1=wiringPiI2CReadReg8(fd_MPL, 0x01);
+	MPL_data_2=wiringPiI2CReadReg8(fd_MPL, 0x02);
+	MPL_data_3=wiringPiI2CReadReg8(fd_MPL, 0x03);
+	height= ((MPL_data_3 & 0xF0)>>4) +(MPL_data_2 <<4) + (MPL_data_1<<12);
+	altitude=(float)height/16;
+	altitude=altitude - altitude_offset;
+	wiringPiI2CWriteReg8(fd_MPL, 0x26, 0xA0); // A2 --> 16x oversample
 }
 
 void calcNewServoPos(void)
 {
 	//calc new servo position
-	Servo_PL_pos=(Servo_PL_offset-rot_y+rot_prevent_out);
-	Servo_PR_pos=(Servo_PR_offset-rot_y+rot_prevent_out);
-	Servo_GU_pos=(Servo_GU_offset-rot_y+rot_prevent_out);
-	Servo_GD_pos=(Servo_GD_offset-rot_y+rot_prevent_out);
+	Servo_PL_pos=(307+Servo_PL_offset-rot_y+rot_prevent_out);
+	Servo_PR_pos=(307+Servo_PR_offset-rot_y+rot_prevent_out);
+	Servo_GU_pos=(307+Servo_GU_offset-rot_y+rot_prevent_out);
+	Servo_GD_pos=(307+Servo_GD_offset-rot_y+rot_prevent_out);
 
 	//set new servo pos
-	Servo_PL.setServoPos(Servo_PL_pos); // ca 560 bis 150 --> 204 bis 408 (1ms bis 2 ms)
+	Servo_PL.setServoPos(Servo_PL_pos); //  206 bis 408 (1ms bis 2 ms)
 	Servo_PR.setServoPos(Servo_PR_pos);
 	Servo_GU.setServoPos(Servo_GU_pos);
 	Servo_GD.setServoPos(Servo_GD_pos);
@@ -625,6 +740,65 @@ void writeLoggingData(void)
 {
 	
 }
+
+void execute_stage_0(void) //debugstage
+{
+	while(1)
+	{
+		getAltitude();
+		printf("altitude = %0.1f   \n", altitude);
+	}
+	
+	
+	/*
+	//Set Servo to initial position and switch off
+	Servo_PL.setServoPos(307+Servo_PL_offset); // 206 bis 408 (1ms bis 2 ms)
+	usleep(200000);
+	Servo_PR.setServoPos(307+Servo_PR_offset);
+	usleep(200000);
+	Servo_GU.setServoPos(307+Servo_GU_offset);
+	usleep(200000);
+	Servo_GD.setServoPos(307+Servo_GD_offset);
+	usleep(200000);
+	Servo_parachute.switchOff();
+	Servo_PL.switchOff();
+	Servo_PR.switchOff();
+	Servo_GU.switchOff();
+	Servo_GD.switchOff();
+	usleep(1000000); //wait for servo move to initial position
+
+	printf("Prelaunch phase Stage 1:   waiting for GPS-lock\n");
+	usleep(1000000);
+	while(BN880_output.north_sec==0)
+	{
+		getGPSsensorData(qd_server_BN880,in_buffer);
+	}
+
+	printf("Prelaunch phase Stage 1:   GPS-lock completed\n");
+	printf("press ENTER________________________________________________________________________________________________\n");
+	//c_input=getchar(); //wait for key press
+	for(int i =0;i<3;i++)
+	{
+		digitalWrite(5,1);
+		usleep(10000);
+		digitalWrite(5,0);
+		usleep(300000);
+	}
+
+	while(1)
+	{
+		//Collecting all sensor data_________________________
+		//getHorizonData(qd_server_horizon,in_buffer);
+		getGPSsensorData(qd_server_BN880,in_buffer);
+		getMotionDataHWT906();
+		printf("alpha2Target= %f   compass_heading= %f   \n", alpha_to_target, compass_heading);
+		// calc y_rotation (spin prevention)______________________________________________________________________________
+		rot_prevent_out= (int)(HWT906_output.w_y*rot_prevent_p);
+		calcNewServoPos();
+	}
+*/
+}
+
 
 void execute_stage_1(void)
 {
@@ -641,13 +815,13 @@ void execute_stage_1(void)
 	/*																								*/
 
 	//Set Servo to initial position and switch off
-	Servo_PL.setServoPos(Servo_PL_offset); // ca 560 bis 150 --> 204 bis 408 (1ms bis 2 ms
+	Servo_PL.setServoPos(307+Servo_PL_offset); // 206 bis 408 (1ms bis 2 ms)
 	usleep(200000);
-	Servo_PR.setServoPos(Servo_PR_offset);
+	Servo_PR.setServoPos(307+Servo_PR_offset);
 	usleep(200000);
-	Servo_GU.setServoPos(Servo_GU_offset);
+	Servo_GU.setServoPos(307+Servo_GU_offset);
 	usleep(200000);
-	Servo_GD.setServoPos(Servo_GD_offset);
+	Servo_GD.setServoPos(307+Servo_GD_offset);
 	usleep(200000);
 	Servo_parachute.switchOff();
 	Servo_PL.switchOff();
@@ -657,7 +831,7 @@ void execute_stage_1(void)
 	usleep(1000000); //wait for servo move to initial position
 	
 	//activate rescue system
-	Servo_parachute.setServoPos(180); //bring parachute servo to lock position (180= lock; 280 = release)
+	Servo_parachute.setServoPos(307); //bring parachute servo to lock position (xxx= lock; xxx = release)
 	printf("Prelaunch phase Stage 1:   rescue system activated but not armed\n");
 	usleep(1000000); //wait for servo move to initial position
 
@@ -683,14 +857,24 @@ void execute_stage_1(void)
 	printf("Prelaunch phase Stage 1:   Rotate rocket around y until beep\n");
 	printf("Prelaunch phase Stage 1:   Crosscheck if back faces to target and wings are straight ahead \n");
 
-
+	onTarget=0;
+	getMotionDataHWT906();
+	getGPSsensorData(qd_server_BN880,in_buffer);
+	usleep(100000);
+	getMotionDataHWT906();
+	getGPSsensorData(qd_server_BN880,in_buffer);
+	usleep(100000);
+	getMotionDataHWT906();
+	getGPSsensorData(qd_server_BN880,in_buffer);
+	usleep(100000);
+	
 	while(!onTarget) // as long as back of rocket not facing to target
 	{
 		//Collecting all sensor data_________________________
 		//getHorizonData(qd_server_horizon,in_buffer);
-		//getGPSsensorData(qd_server_BN880,in_buffer);
+		getGPSsensorData(qd_server_BN880,in_buffer);
 		getMotionDataHWT906();
-		//printf("test");
+
 		// calc y_rotation (spin prevention)______________________________________________________________________________
 		rot_prevent_out= (int)(HWT906_output.w_y*rot_prevent_p);
 
@@ -742,13 +926,13 @@ void execute_stage_1(void)
 	}
 	
 	//Set Servo to initial position and keep on
-	Servo_PL.setServoPos(Servo_PL_offset); // ca 560 bis 150 --> 204 bis 408 (1ms bis 2 ms
+	Servo_PL.setServoPos(307+Servo_PL_offset); // ca 560 bis 150 --> 204 bis 408 (1ms bis 2 ms
 	usleep(200000);
-	Servo_PR.setServoPos(Servo_PR_offset);
+	Servo_PR.setServoPos(307+Servo_PR_offset);
 	usleep(200000);
-	Servo_GU.setServoPos(Servo_GU_offset);
+	Servo_GU.setServoPos(307+Servo_GU_offset);
 	usleep(200000);
-	Servo_GD.setServoPos(Servo_GD_offset);
+	Servo_GD.setServoPos(307+Servo_GD_offset);
 	usleep(200000);
 	printf("Prelaunch phase Stage 1:   Rocket is now initialized and calibrated, target data are confirmed\n");
 	printf("Prelaunch phase Stage 1:   bring rocket into launch position and start fueling\n");
@@ -778,15 +962,66 @@ void execute_stage_1(void)
 
 void execute_stage_2(void)
 {
-	while(1)
+	//get altitude_offset
+	altitude_offset=0;
+	for(int i=0;i<3;i++)
 	{
+		wiringPiI2CWriteReg8(fd_MPL, 0x26, 0xA2); // A2 --> 16x oversample
+		while(!(wiringPiI2CReadReg8(fd_MPL, 0x06) & 0x04))
+		{
+			//wait for altitude data ready flag
+		}
+		MPL_data_1=wiringPiI2CReadReg8(fd_MPL, 0x01);
+		MPL_data_2=wiringPiI2CReadReg8(fd_MPL, 0x02);
+		MPL_data_3=wiringPiI2CReadReg8(fd_MPL, 0x03);
+		height= ((MPL_data_3 & 0xF0)>>4) +(MPL_data_2 <<4) + (MPL_data_1<<12);
+		altitude=(float)height/16;
+		altitude_offset= altitude_offset + altitude;
+		wiringPiI2CWriteReg8(fd_MPL, 0x26, 0xA0); // A2 --> 16x oversample
+		//usleep(100);
+	}
+	altitude_offset=altitude_offset/3;
+	
+	//start flight timer
+	gettimeofday(&flight_time_start,NULL);
+	
+	fprintf(fptr,"Altitude offset = %.01f \n", altitude_offset);
+	
+	while(stage==2)
+	{
+		getMotionDataHWT906();
+		if(HWT906_output.a_y>2)  // acceleration greater than 3g
+		{
+			launchDetected=1;
+			printf("launch detected \n");
+		}
+		if(launchDetected && (HWT906_output.a_y<1))
+		{
+			stage=3;
+			printf("engine cut off detected \n");
+		}
+		printf("y_acceleration=   %f   \n", HWT906_output.a_y);
+	
+		//write logfile
+		gettimeofday(&flight_time_end,NULL);
 		
+		elapsedFlightTime = (flight_time_end.tv_sec - flight_time_start.tv_sec) * 1000000 + (flight_time_end.tv_usec - flight_time_start.tv_usec);
+		if((elapsedFlightTime-elapsedFlightTime_old)>10000)
+		{
+			printf("time %10lld\n", elapsedFlightTime);
+		}
+		elapsedFlightTime_old=elapsedFlightTime;
+			
 	}
 }
 
 void execute_stage_3(void)
 {
-	
+	fclose(fptr);
+	while(1)
+	{
+		
+	}
 }
 
 void execute_stage_4(void)
